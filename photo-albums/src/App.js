@@ -1,9 +1,90 @@
 import React, { Component } from 'react';
-import Amplify, { API, graphqlOperation } from 'aws-amplify';
 import aws_exports from './aws-exports';
 import { withAuthenticator } from 'aws-amplify-react';
 import { Connect } from 'aws-amplify-react';
-import { Grid, Header, Input, List, Segment } from 'semantic-ui-react';
+import { Form, Grid, Header, Input, List, Segment } from 'semantic-ui-react';
+import {BrowserRouter as Router, Route, NavLink} from 'react-router-dom';
+import {v4 as uuidv4} from 'uuid';
+import Amplify, { API, graphqlOperation, Storage } from 'aws-amplify';
+
+class S3ImageUpload extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { uploading: false }
+  }
+  onChange = async (e) => {
+    const file = e.target.files[0];
+    const fileName = uuidv4();
+    this.setState({uploading: true});
+    const result = await Storage.put(
+      fileName, 
+      file, 
+      {
+        customPrefix: { public: 'uploads/' },
+        metadata: { albumid: this.props.albumId }
+      }
+    );
+    console.log('Uploaded file: ', result);
+    this.setState({uploading: false});
+  }
+  render() {
+    return (
+      <div>
+        <Form.Button
+          onClick={() => document.getElementById('add-image-file-input').click()}
+          disabled={this.state.uploading}
+          icon='file image outline'
+          content={ this.state.uploading ? 'Uploading...' : 'Add Image' }
+        />
+        <input
+          id='add-image-file-input'
+          type="file"
+          accept='image/*'
+          onChange={this.onChange}
+          style={{ display: 'none' }}
+        />
+      </div>
+    );
+  }
+}
+
+
+const GetAlbum = `query GetAlbum($id: ID!) {
+  getAlbum(id: $id) {
+    id
+    name
+  }
+}
+`;
+
+
+class AlbumDetailsLoader extends React.Component {
+  render() {
+    return (
+      <Connect query={graphqlOperation(GetAlbum, { id: this.props.id })}>
+        {({ data, loading, errors }) => {
+          if (loading) { return <div>Loading...</div>; }
+          if (errors.length > 0) { return <div>{JSON.stringify(errors)}</div>; }
+          if (!data.getAlbum) return;
+          return <AlbumDetails album={data.getAlbum} />;
+        }}
+      </Connect>
+    );
+  }
+}
+
+class AlbumDetails extends Component {
+  render() {
+    return (
+      <Segment>
+        <Header as='h3'>{this.props.album.name}</Header>
+        <S3ImageUpload albumId={this.props.album.id}/> 
+        <p>TODO: Show photos for this album</p>
+      </Segment>
+    )
+  }
+}
+
 const SubscribeToNewAlbums = `
   subscription OnCreateAlbum {
     onCreateAlbum {
@@ -74,11 +155,12 @@ function makeComparator(key, order='asc') {
 }
 class AlbumsList extends React.Component {
   albumItems() {
-        return this.props.albums.sort(makeComparator('name')).map(album =>
-            <li key={album.id}>
-                {album.name}
-            </li>);
-    }
+    return this.props.albums.sort(makeComparator('name')).map(album =>
+      <List.Item key={album.id}>
+        <NavLink to={`/albums/${album.id}`}>{album.name}</NavLink>
+      </List.Item>
+    );
+  }
 
   render() {
     return (
@@ -132,12 +214,22 @@ Amplify.configure(aws_exports);
 class App extends Component {
   render() {
     return (
-      <Grid padded>
-        <Grid.Column>
-          <NewAlbum />
-          <AlbumsListLoader />
-        </Grid.Column>
-      </Grid>
+      <Router>
+        <Grid padded>
+          <Grid.Column>
+            <Route path="/" exact component={NewAlbum}/>
+            <Route path="/" exact component={AlbumsListLoader}/>
+            <Route
+              path="/albums/:albumId"
+              render={ () => <div><NavLink to='/'>Back to Albums list</NavLink></div> }
+            />
+            <Route
+              path="/albums/:albumId"
+              render={ props => <AlbumDetailsLoader id={props.match.params.albumId}/> }
+            />
+          </Grid.Column>
+        </Grid>
+      </Router>
     );
   }
 }
